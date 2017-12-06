@@ -20,7 +20,7 @@ library(tidyverse)
 library(sf)
 
 # Change dataset
-change_df <- read.csv("data/output/msa_change_transit_vars.csv") 
+change_df <- read.csv("data/input/msa_change_transit_vars.csv") 
 
 # this function takes an msa name and geocodes the primary city in that
 # msa. It returns a named vector of msa_name and coordinates

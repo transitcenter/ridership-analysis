@@ -15,9 +15,7 @@
 ## 
 ## Steps:
 ##  1. Combine sheets of excel file into useful format
-##  2. Add census data
-##  3. Add gas prices data
-##  4. Calculate change matrix
+##  2. Calculate change matrix
 ##
 ## Note: run 'TransitCenter_match_agencies_to_msas.R' before this script
 ###########################################################################
@@ -152,88 +150,17 @@ get_national_averages <- function(df) {
     mutate(GEOID.msa = "NNNNN", name_msa = "National Average") %>%
     # find the yearly avergae
     group_by(GEOID.msa, name_msa, year) %>%
-    dplyr::summarise_all(mean, na.rm = TRUE) %>%
+    summarise_all(mean, na.rm = TRUE) %>%
     ungroup %>%
     # bind to original dataset
     rbind(df, .)
 }
 
 df <- get_national_averages(df)
-#
-# Step 2: Add census data -------------------------------------------------
-
-# this function takes a numeric vector and finds the percent change
-# from the first value to each number in that vector
-find_pct_change <- function(vec) {
-  origin <- first(na.omit(vec))
-  change <- (vec - origin) / origin
-  return(change)
-}
-
-# read dataset of yearly MSA-level census data
-msa_census <- read.csv("data/input/msa_yearly_census_variables.csv")
-msa_census <- msa_census %>%
-  # generate additional fields to match existing carto dataset. Some of
-  # these are redundant but create them in the interest of consistency
-  mutate(tot_labor = (pct_emp / 100) * tot_pop, # total in labort force
-         # total foreign population
-         tot_pop_foreign = (pct_pop_foreign / 100) * tot_pop, 
-         tot_emp = (pct_emp / 100) * tot_pop, # total number employed
-         # total number of households without a vehicle
-         hh_no_vehicle = (pct_hh_no_vehicle / 100) * tot_pop) %>%
-  # group by MSA
-  group_by(geoid_msa) %>%
-  # calculate yearly change-since-2010 variables 
-  mutate(emp_chg = find_pct_change(tot_labor), # total employed
-         pop_chg = find_pct_change(tot_pop)) %>% # total population
-  # rename GEOID field to match carto dataset
-  dplyr::rename(GEOID.msa = geoid_msa) %>% 
-  data.frame() 
-
-# add dataset with square mileage of each MSA 
-area <- read.csv("data/input/msa_area_lookup.csv") %>%
-  mutate(GEOID.msa = as.character(GEOID.msa))
-
-# join area table to census variables
-msa_census <- left_join(msa_census, area) %>%
-  # calculate population density
-  mutate(pop_dens = tot_pop / area_miles) %>%
-  select(-name_msa)
-
-# join to master dataset
-df <- df %>%
-  left_join(msa_census) 
-#
-# Step 3: Add gas prices --------------------------------------------------
-
-# read in dataset of yearly gas prices by state
-gas <- read.csv("data/input/statewide_yearly_gas_prices.csv") %>% select(-X)
-# calculate the yearly national average gas price and bind it to the
-# bottom of the dataset
-gas_prices <- gas %>%
-  group_by(year) %>%
-  dplyr::summarise(State = 'ge', gas = mean(gas)) %>%
-  select(State, year, gas) %>%
-  rbind(gas, .)
-
-# This function extracts the two letter abbreviation of the primary 
-# state for each msa 
-get_state <- function(msa_names) {
-  gsub("-.*,|$", "", msa_names) %>% 
-    gsub("-.*$", "", .) %>% 
-    gsub(",", "", .) %>%
-    substr(., nchar(.) - 1, nchar(.))
-}
-
-# Join the gas prices to the master dataset by state
-df <- df %>%
-  mutate(State = get_state(name_msa)) %>%
-  left_join(gas_prices) %>%
-  select(-State) 
 
 write.csv(df, "data/output/msa_yearly_transit_vars.csv", row.names = FALSE)
 #
-# Step 4: Calculate change matrix -----------------------------------------
+# Step 2: Calculate change matrix -----------------------------------------
 
 # this function takes the dataframe created in step 1 and a year value and
 # generates a matrix of all ntd variables for each msa in that year
@@ -260,7 +187,7 @@ create_change_df <- function(df, year_1, year_2) {
   y2 <- create_year_matrix(df, year_2)
   # since most variables will be reported as % change, start by calculating 
   # pct change for all of them
-  change_matrix <- ((y2 - y1) / y1) * 100
+  change_matrix <- (y2 - y1) / y1
   # convert the resulting matrix to a dataframe and bind it to the id dataframe
   change_df <- cbind(df_id, data.frame(change_matrix))
   
@@ -273,12 +200,8 @@ create_change_df <- function(df, year_1, year_2) {
   return(change_df)
 }
 
-# yearly dataframe of just ntd data
-ntd_yearly <- df %>%
-  select(GEOID.msa:farebox_recovery, gas)
-
 # create this dataset for 2006-2015
-change_df <- ntd_yearly %>%
+change_df <- df %>%
   filter(name_msa != "National Average") %>%
   create_change_df(year_1 = 2006, year_2 = 2015)
 
@@ -301,9 +224,9 @@ add_year_variables <- function(change_df, yearly_df, year_val) {
 }
 
 change_df <- change_df %>%
-  add_year_variables(ntd_yearly, 2006) %>%
-  add_year_variables(ntd_yearly, 2015) %>%
-  add_year_variables(ntd_yearly, 2016)
+  add_year_variables(df, 2006) %>%
+  add_year_variables(df, 2015) %>%
+  add_year_variables(df, 2016)
 
 write.csv(change_df, "data/output/msa_change_transit_vars.csv", row.names = FALSE)
 
